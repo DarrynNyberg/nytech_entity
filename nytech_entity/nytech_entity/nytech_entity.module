@@ -1,0 +1,261 @@
+<?php
+
+function nytech_entity_menu() {
+	$items['api/v1/nytech/entity_list/%/%'] = array(
+		'title' => 'List entitys',
+		'page arguments' => array(4,5),
+	    'page callback' => 'nytech_list_entity_by_type',
+	    'access callback' => 'nytech_auth_callback',
+        'delivery callback' => 'drupal_json_output',
+	);
+	$items['api/v1/nytech/entity/%/%'] = array(
+		'title' => 'Entity Operations',
+		'page arguments' => array(4,5),
+	    'page callback' => 'nytech_entity_ops',
+	    'access callback' => 'nytech_auth_callback',
+        'delivery callback' => 'drupal_json_output',
+	);
+	$items['api/v1/nytech/entity_new/%'] = array(
+		'title' => 'New Entity',
+		'page arguments' => array(4),
+	    'page callback' => 'nytech_entity_new',
+	    'access callback' => 'nytech_auth_callback',
+        'delivery callback' => 'drupal_json_output',
+	);
+	$items['api/v1/nytech/entity_relation/%/%/%'] = array(
+		'title' => 'New Entity',
+		'page arguments' => array(4,5,6),
+	    'page callback' => 'nytech_entity_children',
+	    'access callback' => 'nytech_auth_callback',
+        'delivery callback' => 'drupal_json_output',
+	);
+	
+	return $items;
+}
+
+function get_nytech_entity($entity_type, $eid) {
+	$entity = entity_load_single($entity_type, $eid);
+	$entity_array = get_object_vars($entity);
+	return $entity_array;
+}
+
+function post_nytech_entity($entity_type, $property_array, $uid) {
+	
+	$edit = array(
+		'type' => $entity_type, // set entity type
+		'uid' => $uid, // Set with uid if uid is in $paroperty_array['uid]
+		'created' => date('U'), // set created date
+	);
+	
+	foreach ($property_array as $key => $value){
+		if($key == 'encoded') {
+			// skip this
+		}
+		$edit[$key] = $value;
+	}
+	
+	// Image handeling
+	if(!empty($property_array['encoded'])) {
+		$image = $property_array['encoded'];
+		$file = nytech_image_post($image, $uid);
+		if(!empty($file)) {
+			$edit['fid'] = $file['fid'];
+			$edit['filename'] = $file['filename'];
+			$edit['filemime'] = $file['filemime'];
+		}
+	
+	}
+	
+	
+	$entity = entity_create($entity_type, $edit);
+	$entity->save();
+	$output = get_nytech_entity($entity_type, $entity->eid);
+	return $output;
+}
+
+
+
+function put_nytech_entity($entity_type, $eid, $property_array) {
+	
+	$entity = entity_load_single($entity_type, $eid);
+	
+	foreach ($property_array as $key => $value){
+		$entity->{$key} = $value;
+	}
+	
+	// Image handeling
+	if(!empty($property_array['encoded'])) {
+		$image = $property_array['encoded'];
+		$file = nytech_image_post($image, $entity->uid);
+		if(!empty($file)) {
+			
+			// remove old file if present
+			if(!empty($entity->fid)) {
+				$old_file = entity_load_single('file', $entity->fid);
+				if(is_object($old_file) && is_numeric($old_file->fid)) {
+					entity_delete('file', $old_file->fid);
+				}
+			}
+			
+			// Set new file object
+			$entity->fid = $file['fid'];
+			$entity->filename = $file['filename'];
+			$entity->filemime = $file['filemime'];
+			
+			
+		}
+	
+	}
+	
+	entity_save($entity_type, $entity);
+	
+	$output = get_nytech_entity($entity_type, $eid);
+	return $output;
+}
+
+function nytech_field_array_pop($value, $type = 'value') {
+	if($type == 'value') {
+		$output = array(
+			'und' => array(
+				0 => array(
+					$type => $value,
+				),
+			),
+		);
+	} elseif($type == 'image') {
+		$output = array(
+			'und' => array(
+				0 => array(
+					$value,
+				),
+			),
+		);
+	}
+	
+	return $output;
+}
+
+
+function delete_nytech_entity($entity_type, $eid) {
+	entity_delete($entity_type, $eid);
+}
+
+function nytech_list_entity_by_type($entity_type, $limit) {
+	$auth = nytech_api_auth();
+	$output = array(
+		'status' => $auth['status'],
+		'uid' => $auth['uid'],
+		'message' => $auth['message'],
+	);
+	$query = new EntityFieldQuery();
+	$query->entityCondition('entity_type', $entity_type)
+	  ->propertyOrderBy('eid', 'DESC')
+	  ->range(0, $limit)
+	  ->addMetaData('account', user_load($auth['uid'])); // Run the query as user 1.
+	
+	$result = $query->execute();
+	
+	if (isset($result[$entity_type])) {
+	  $eids = array_keys($result[$entity_type]);
+	  $output['data'] = entity_load($entity_type, $eids);
+	} else {
+		$output['data'] = array();
+	}
+	
+	return $output;
+}
+
+function nytech_entity_children($entity_type, $property, $eid) {
+	$auth = nytech_api_auth();
+	$output = array(
+		'status' => $auth['status'],
+		'uid' => $auth['uid'],
+		'message' => $auth['message'],
+	);
+	$query = new EntityFieldQuery();
+	$query->entityCondition('entity_type', $entity_type)
+	  ->propertyCondition($property, $eid, '=')
+	  ->range(0, 100)
+	  ->addMetaData('account', user_load($auth['uid'])); // Run the query as user 1.
+	
+	$result = $query->execute();
+	
+	if (isset($result[$entity_type])) {
+	  $eids = array_keys($result[$entity_type]);
+	  $output['data'] = entity_load($entity_type, $eids);
+	} else {
+		$output['data'] = array();
+	}
+	
+	return $output;
+}
+
+function nytech_entity_ops($entity_type, $eid) {
+	$auth = nytech_api_auth();
+	$output = array(
+		'status' => $auth['status'],
+		'uid' => $auth['uid'],
+		'message' => $auth['message'],
+		'method' => 'GET',
+	);
+	if($_SERVER['REQUEST_METHOD'] === 'POST') {
+		
+		$property_array = array();
+		$field_array = array();
+		
+		if(!empty($_POST)) {
+			$output['method'] = 'POST';
+			$property_array = $_POST;
+			$output['data'] = put_nytech_entity($entity_type, $eid, $property_array);
+		}
+	} elseif($_SERVER['REQUEST_METHOD'] === 'DELETE') {
+	    $entity = entity_load_single($entity_type, $eid);
+		if($entity->fid) {
+			entity_delete('file', $entity->fid);
+		}
+	    entity_delete($entity_type, $eid);
+		$output['message'] = 'Deleted!';
+	} else {
+	    $output['data'] = get_nytech_entity($entity_type, $eid);
+	}
+	
+	return $output;
+}
+
+function nytech_entity_new($entity_type) {
+	$auth = nytech_api_auth();
+	$output = array(
+		'status' => $auth['status'],
+		'uid' => $auth['uid'],
+		'message' => $auth['message'],
+	);
+	$_POST['uid'] = $auth['uid']; // if present, set the user id of the post var.
+	if($_SERVER['REQUEST_METHOD'] === 'POST') {
+		$property_array = $_POST;
+		$output['method'] = 'POST';
+		$output['data'] = post_nytech_entity($entity_type, $property_array, $auth['uid']);
+	} else {
+		$output['message'] = 'ERROR: Post did not work.';
+	}
+	return $output;
+}
+
+function nytech_image_post($image, $uid = 0) {
+	
+	// $image is a base 64 encoded image ready to be parces.
+	$image_data = explode(',', $image);
+	$data = base64_decode($image_data[1]);   
+
+	$finfo = finfo_open();
+    $mime_type = finfo_buffer($finfo, $data, FILEINFO_MIME_TYPE);
+    finfo_close($finfo);
+	
+    $ext = $mime_type ? str_replace('image/', '', $mime_type) : 'png';
+    $file_name = 'user_' . $uid . '_' . date('MjYgisa');
+	$file_path = 'public://' . $file_name . '.' . $ext;
+   	$file = file_save_data($data, $file_path, FILE_EXISTS_REPLACE);
+    
+    $output = (array)$file;
+	return $output;
+}
+

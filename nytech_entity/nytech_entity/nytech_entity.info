@@ -1,0 +1,6 @@
+name = NyTech entity
+description = API for NyTech Entity objects. (chats).
+core = 7.x
+package = NyTech
+files[] = nytech_entity.module
+dependencies[] = entity
