@@ -29,6 +29,13 @@ function nytech_entity_menu() {
 	    'access callback' => 'nytech_auth_callback',
         'delivery callback' => 'drupal_json_output',
 	);
+	$items['api/v1/nytech/entity_delete/%/%'] = array(
+		'title' => 'New Entity',
+		'page arguments' => array(4,5),
+	    'page callback' => 'delete_nytech_entity',
+	    'access callback' => 'nytech_auth_callback',
+        'delivery callback' => 'drupal_json_output',
+	);
 	
 	return $items;
 }
@@ -40,11 +47,17 @@ function get_nytech_entity($entity_type, $eid) {
 }
 
 function post_nytech_entity($entity_type, $property_array, $uid) {
+	$date = date('U');
+	
+	if(!empty($property_array['created'])) {
+		$date = $property_array['created'];
+	}
 	
 	$edit = array(
 		'type' => $entity_type, // set entity type
 		'uid' => $uid, // Set with uid if uid is in $paroperty_array['uid]
-		'created' => date('U'), // set created date
+		'created' => $date, // set created date
+		'updated' => date('U'), // set created date
 	);
 	
 	foreach ($property_array as $key => $value){
@@ -56,8 +69,8 @@ function post_nytech_entity($entity_type, $property_array, $uid) {
 	
 	// Image handeling
 	if(!empty($property_array['encoded'])) {
-		$image = $property_array['encoded'];
-		$file = nytech_image_post($image, $uid);
+		$encoded = $property_array['encoded'];
+		$file = nytech_file_post($encoded, $uid);
 		if(!empty($file)) {
 			$edit['fid'] = $file['fid'];
 			$edit['filename'] = $file['filename'];
@@ -70,6 +83,7 @@ function post_nytech_entity($entity_type, $property_array, $uid) {
 	$entity = entity_create($entity_type, $edit);
 	$entity->save();
 	$output = get_nytech_entity($entity_type, $entity->eid);
+	
 	return $output;
 }
 
@@ -83,10 +97,12 @@ function put_nytech_entity($entity_type, $eid, $property_array) {
 		$entity->{$key} = $value;
 	}
 	
+	$entity->updated = date('U');
+	
 	// Image handeling
 	if(!empty($property_array['encoded'])) {
-		$image = $property_array['encoded'];
-		$file = nytech_image_post($image, $entity->uid);
+		$encoded = $property_array['encoded'];
+		$file = nytech_file_post($encoded, $entity->uid);
 		if(!empty($file)) {
 			
 			// remove old file if present
@@ -138,6 +154,8 @@ function nytech_field_array_pop($value, $type = 'value') {
 
 function delete_nytech_entity($entity_type, $eid) {
 	entity_delete($entity_type, $eid);
+	$output['status'] = 200;
+	$output['message'] = 'You delete that yo!';
 }
 
 function nytech_list_entity_by_type($entity_type, $limit) {
@@ -209,10 +227,6 @@ function nytech_entity_ops($entity_type, $eid) {
 			$output['data'] = put_nytech_entity($entity_type, $eid, $property_array);
 		}
 	} elseif($_SERVER['REQUEST_METHOD'] === 'DELETE') {
-	    $entity = entity_load_single($entity_type, $eid);
-		if($entity->fid) {
-			entity_delete('file', $entity->fid);
-		}
 	    entity_delete($entity_type, $eid);
 		$output['message'] = 'Deleted!';
 	} else {
@@ -240,22 +254,28 @@ function nytech_entity_new($entity_type) {
 	return $output;
 }
 
-function nytech_image_post($image, $uid = 0) {
+function nytech_file_post($encoded, $uid = 0) {
 	
-	// $image is a base 64 encoded image ready to be parces.
-	$image_data = explode(',', $image);
-	$data = base64_decode($image_data[1]);   
+	// $data is a base 64 encoded file ready to be parces.
+	$encoded_data = explode(',', $encoded);
+	$data = base64_decode($encoded_data[1]);   
 
 	$finfo = finfo_open();
     $mime_type = finfo_buffer($finfo, $data, FILEINFO_MIME_TYPE);
     finfo_close($finfo);
 	
-    $ext = $mime_type ? str_replace('image/', '', $mime_type) : 'png';
+	$type_array = explode('/', $mime_type);
+	
+	$the_type = $type_array[0];
+	$ext = $type_array[1];
+	
+    //$ext = $mime_type ? str_replace('image/', '', $mime_type) : 'png';
     $file_name = 'user_' . $uid . '_' . date('MjYgisa');
 	$file_path = 'public://' . $file_name . '.' . $ext;
    	$file = file_save_data($data, $file_path, FILE_EXISTS_REPLACE);
     
     $output = (array)$file;
+	
 	return $output;
 }
 
